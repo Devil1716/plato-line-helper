@@ -5,7 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
-import android.view.MotionEvent
+import android.os.SystemClock
 import android.view.View
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -14,16 +14,8 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.sin
 
-class TrajectoryView(
-    context: Context,
-    private val onAimGestureFinished: (() -> Unit)? = null
-) : View(context) {
+class TrajectoryView(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(190, 255, 255, 255)
-        textAlign = Paint.Align.CENTER
-        textSize = 34f
-    }
     private val arrowPath = Path()
     private val defaultBounds = FieldBounds(0f, 0f, 0f, 0f, 0f, 0f)
 
@@ -38,17 +30,13 @@ class TrajectoryView(
     private var fallbackBallY = 0f
     private var detectionMisses = 0
     private var hasLiveBallDetection = false
-
-    private var touchStartX = 0f
-    private var touchStartY = 0f
-    private var aimX = 0f
-    private var aimY = 0f
-    private var previousAimX = 0f
-    private var previousAimY = 0f
-    private var swipeStartAngle = 0f
-    private var swipeEndAngle = 0f
-    private var isAiming = false
-    private var aimModeEnabled = false
+    private var lastDetectedX = 0f
+    private var lastDetectedY = 0f
+    private var lastDetectedAt = 0L
+    private var velocityX = 0f
+    private var velocityY = 0f
+    private var predictionVisibleUntil = 0L
+    private var guideEnabled = true
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -68,6 +56,7 @@ class TrajectoryView(
     }
 
     fun updateDetectedBall(position: Pair<Float, Float>?) {
+        val now = SystemClock.uptimeMillis()
         if (position == null) {
             detectionMisses++
             hasLiveBallDetection = false
@@ -76,12 +65,27 @@ class TrajectoryView(
                 ballY = fallbackBallY
             }
         } else {
+            if (lastDetectedAt > 0L) {
+                val frameScale = ((now - lastDetectedAt).coerceAtLeast(1L) / 67f).coerceAtLeast(0.5f)
+                val measuredVx = (position.first - lastDetectedX) / frameScale
+                val measuredVy = (position.second - lastDetectedY) / frameScale
+                velocityX = velocityX * 0.45f + measuredVx * 0.55f
+                velocityY = velocityY * 0.45f + measuredVy * 0.55f
+
+                if (hypot(velocityX, velocityY) > MOVING_BALL_SPEED) {
+                    predictionVisibleUntil = now + PREDICTION_HOLD_MS
+                }
+            }
+
             detectionMisses = 0
             hasLiveBallDetection = true
             ballX = position.first
             ballY = position.second
             fallbackBallX = ballX
             fallbackBallY = ballY
+            lastDetectedX = ballX
+            lastDetectedY = ballY
+            lastDetectedAt = now
         }
         invalidate()
     }
@@ -104,105 +108,27 @@ class TrajectoryView(
         invalidate()
     }
 
-    fun setAimModeEnabled(enabled: Boolean) {
-        aimModeEnabled = enabled
-        if (!enabled) {
-            isAiming = false
-        }
+    fun setGuideEnabled(enabled: Boolean) {
+        guideEnabled = enabled
         invalidate()
-    }
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!aimModeEnabled) return false
-
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                touchStartX = ballX
-                touchStartY = ballY
-                aimX = event.x
-                aimY = event.y
-                previousAimX = event.x
-                previousAimY = event.y
-                swipeStartAngle = 0f
-                swipeEndAngle = 0f
-                isAiming = true
-                invalidate()
-                return true
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                previousAimX = aimX
-                previousAimY = aimY
-                aimX = event.x
-                aimY = event.y
-                val fromStartX = aimX - touchStartX
-                val fromStartY = aimY - touchStartY
-                val segmentX = aimX - previousAimX
-                val segmentY = aimY - previousAimY
-                if (hypot(fromStartX, fromStartY) > 6f && swipeStartAngle == 0f) {
-                    swipeStartAngle = atan2(fromStartY, fromStartX)
-                }
-                if (hypot(segmentX, segmentY) > 2f) {
-                    swipeEndAngle = atan2(segmentY, segmentX)
-                }
-                invalidate()
-                return true
-            }
-
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                isAiming = false
-                postDelayed({ onAimGestureFinished?.invoke() }, 1200L)
-                invalidate()
-                return true
-            }
-        }
-        return true
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (!guideEnabled || !hasLiveBallDetection) return
 
-        if (!aimModeEnabled) {
-            return
+        drawDetectedBallIndicator(canvas)
+        if (SystemClock.uptimeMillis() <= predictionVisibleUntil) {
+            val result = simulateFromVelocity(ballX, ballY, velocityX, velocityY)
+            drawTrajectory(canvas, result.points, result.outcome)
         }
-
-        drawGoalZone(canvas)
-
-        if (lockedFieldBounds == null) {
-            canvas.drawText("calibrating...", width / 2f, height * 0.18f, textPaint)
-        }
-
-        if (isAiming) {
-            val shot = currentShot()
-            if (shot != null) {
-                val result = simulatePhysics(ballX, ballY, shot.dirX, shot.dirY, shot.speed, shot.sidespin)
-                drawPullVector(canvas)
-                drawTrajectory(canvas, result.points, result.outcome)
-                drawPowerBar(canvas, shot.speed)
-            }
-        } else {
-            canvas.drawText("Drag for guide, then repeat shot in Plato", width / 2f, height * 0.82f, textPaint)
-        }
-
-        drawBall(canvas)
     }
 
-    private fun currentShot(): Shot? {
-        val dragX = aimX - touchStartX
-        val dragY = aimY - touchStartY
-        val swipeDist = hypot(dragX, dragY)
-        if (swipeDist <= 12f) return null
-
-        val dirX = -dragX / swipeDist
-        val dirY = -dragY / swipeDist
-        val initSpeed = (swipeDist / 12f).coerceIn(6f, 22f)
-        return Shot(dirX, dirY, initSpeed, deriveSidespin())
-    }
-
-    private fun deriveSidespin(): Float {
-        if (swipeStartAngle == 0f || swipeEndAngle == 0f) return 0f
-        val delta = normalizeAngle(swipeEndAngle - swipeStartAngle)
-        return (delta / 1.2f).coerceIn(-1f, 1f)
+    private fun simulateFromVelocity(startX: Float, startY: Float, vx: Float, vy: Float): SimulationResult {
+        val speed = hypot(vx, vy)
+        if (speed <= 0.01f) return SimulationResult(emptyList(), TrajectoryOutcome.STOPS_SHORT)
+        val initSpeed = (speed * 0.9f).coerceIn(5f, 30f)
+        return simulatePhysics(startX, startY, vx / speed, vy / speed, initSpeed)
     }
 
     fun simulatePhysics(
@@ -329,93 +255,12 @@ class TrajectoryView(
         canvas.drawPath(arrowPath, paint)
     }
 
-    private fun drawPowerBar(canvas: Canvas, initSpeed: Float) {
-        val barWidth = width * 0.45f
-        val barHeight = 14f
-        val left = (width - barWidth) / 2f
-        val top = height * 0.875f - barHeight
-        val right = left + barWidth
-        val bottom = top + barHeight
-        val power = ((initSpeed - 6f) / 16f).coerceIn(0f, 1f)
-
-        paint.style = Paint.Style.FILL
-        paint.color = Color.argb((0.12f * 255).toInt(), 255, 255, 255)
-        canvas.drawRoundRect(left, top, right, bottom, 7f, 7f, paint)
-
-        paint.color = when {
-            power < 0.4f -> Color.rgb(58, 224, 117)
-            power < 0.75f -> Color.rgb(255, 220, 64)
-            else -> Color.rgb(255, 80, 74)
-        }
-        canvas.drawRoundRect(left, top, left + barWidth * power, bottom, 7f, 7f, paint)
-
-        paint.color = Color.argb(210, 255, 255, 255)
-        paint.textAlign = Paint.Align.CENTER
-        paint.textSize = 24f
-        canvas.drawText("POWER", width / 2f, top - 12f, paint)
-    }
-
-    private fun drawPullVector(canvas: Canvas) {
+    private fun drawDetectedBallIndicator(canvas: Canvas) {
+        val radius = 16f
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 3f
-        paint.color = Color.argb(150, 255, 255, 255)
-        canvas.drawLine(ballX, ballY, aimX, aimY, paint)
-
-        paint.style = Paint.Style.FILL
-        paint.color = Color.argb(180, 255, 255, 255)
-        canvas.drawCircle(aimX, aimY, 7f, paint)
-    }
-
-    private fun drawGoalZone(canvas: Canvas) {
-        paint.style = Paint.Style.FILL
-        paint.color = Color.argb(58, 76, 255, 132)
-        canvas.drawRect(
-            fieldBounds.goalLeft,
-            fieldBounds.top - 12f,
-            fieldBounds.goalRight,
-            fieldBounds.top + 22f,
-            paint
-        )
-    }
-
-    private fun drawBall(canvas: Canvas) {
-        val radius = width * 0.043f
-        if (hasLiveBallDetection) {
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = 2f
-            paint.color = Color.argb((0.6f * 255).toInt(), 80, 255, 120)
-            canvas.drawCircle(ballX, ballY, radius + 8f, paint)
-        }
-
-        paint.style = Paint.Style.FILL
-        paint.color = Color.WHITE
-        canvas.drawCircle(ballX, ballY, radius, paint)
-
-        paint.color = Color.rgb(42, 48, 54)
-        drawPatch(canvas, ballX, ballY - radius * 0.24f, radius * 0.26f, -90f)
-        drawPatch(canvas, ballX - radius * 0.36f, ballY + radius * 0.18f, radius * 0.2f, 40f)
-        drawPatch(canvas, ballX + radius * 0.38f, ballY + radius * 0.2f, radius * 0.2f, -20f)
-    }
-
-    private fun drawPatch(canvas: Canvas, cx: Float, cy: Float, radius: Float, rotationDegrees: Float) {
-        val path = Path()
-        val rotation = Math.toRadians(rotationDegrees.toDouble()).toFloat()
-
-        repeat(5) { index ->
-            val angle = rotation + Math.toRadians((index * 72 - 90).toDouble()).toFloat()
-            val x = cx + cos(angle) * radius
-            val y = cy + sin(angle) * radius
-            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-        }
-        path.close()
-        canvas.drawPath(path, paint)
-    }
-
-    private fun normalizeAngle(angle: Float): Float {
-        var normalized = angle
-        while (normalized > Math.PI) normalized -= (Math.PI * 2).toFloat()
-        while (normalized < -Math.PI) normalized += (Math.PI * 2).toFloat()
-        return normalized
+        paint.strokeWidth = 2.5f
+        paint.color = Color.argb(190, 90, 255, 130)
+        canvas.drawCircle(ballX, ballY, radius + 5f, paint)
     }
 
     private fun FieldBounds.isCloseTo(other: FieldBounds): Boolean {
@@ -444,13 +289,6 @@ class TrajectoryView(
         STOPS_SHORT
     }
 
-    private data class Shot(
-        val dirX: Float,
-        val dirY: Float,
-        val speed: Float,
-        val sidespin: Float
-    )
-
     companion object {
         const val FRICTION = 0.973f
         const val WALL_RESTITUTION = 0.68f
@@ -459,5 +297,7 @@ class TrajectoryView(
         const val MIN_SPEED = 0.3f
         const val DT = 1.0f
         const val MAX_STEPS = 1000
+        private const val MOVING_BALL_SPEED = 2.0f
+        private const val PREDICTION_HOLD_MS = 1300L
     }
 }

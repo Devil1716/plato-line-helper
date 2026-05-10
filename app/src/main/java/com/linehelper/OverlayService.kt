@@ -28,7 +28,7 @@ class OverlayService : Service() {
     private var controlBubbleView: ControlBubbleView? = null
     private var controlBubbleParams: WindowManager.LayoutParams? = null
     private var captureManager: ScreenCaptureManager? = null
-    private var aimModeEnabled = false
+    private var guideEnabled = true
 
     override fun onCreate() {
         super.onCreate()
@@ -39,13 +39,13 @@ class OverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_ENABLE_AIM -> {
-                setAimModeEnabled(true)
+            ACTION_ENABLE_GUIDE -> {
+                setGuideEnabled(true)
                 return START_STICKY
             }
 
-            ACTION_DISABLE_AIM -> {
-                setAimModeEnabled(false)
+            ACTION_DISABLE_GUIDE -> {
+                setGuideEnabled(false)
                 return START_STICKY
             }
 
@@ -92,17 +92,15 @@ class OverlayService : Service() {
 
     private fun addOverlay() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        trajectoryView = TrajectoryView(this) {
-            setAimModeEnabled(false)
-        }.apply {
-            setAimModeEnabled(aimModeEnabled)
+        trajectoryView = TrajectoryView(this).apply {
+            setGuideEnabled(guideEnabled)
         }
 
         overlayParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             overlayType(),
-            overlayFlags(),
+            drawOnlyOverlayFlags(),
             PixelFormat.TRANSLUCENT
         )
 
@@ -110,27 +108,20 @@ class OverlayService : Service() {
         addControlBubble()
     }
 
-    private fun setAimModeEnabled(enabled: Boolean) {
-        aimModeEnabled = enabled
-        trajectoryView?.setAimModeEnabled(enabled)
-        controlBubbleView?.setAimModeEnabled(enabled)
-
-        val params = overlayParams ?: return
-        params.flags = overlayFlags()
-        trajectoryView?.let { view ->
-            runCatching { windowManager?.updateViewLayout(view, params) }
-        }
+    private fun setGuideEnabled(enabled: Boolean) {
+        guideEnabled = enabled
+        trajectoryView?.setGuideEnabled(enabled)
+        controlBubbleView?.setGuideEnabled(enabled)
         updateNotification()
     }
 
     private fun addControlBubble() {
         controlBubbleView = ControlBubbleView(
             context = this,
-            onAimToggle = { setAimModeEnabled(!aimModeEnabled) },
-            onStop = { stopSelf() },
+            onGuideToggle = { setGuideEnabled(!guideEnabled) },
             onDrag = { dx, dy -> moveControlBubble(dx, dy) }
         ).apply {
-            setAimModeEnabled(aimModeEnabled)
+            setGuideEnabled(guideEnabled)
         }
 
         controlBubbleParams = WindowManager.LayoutParams(
@@ -143,8 +134,8 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 12
-            y = 720
+            x = resources.displayMetrics.widthPixels - 56
+            y = (resources.displayMetrics.heightPixels * 0.45f).toInt()
         }
 
         windowManager?.addView(controlBubbleView, controlBubbleParams)
@@ -152,8 +143,8 @@ class OverlayService : Service() {
 
     private fun moveControlBubble(dx: Int, dy: Int) {
         val params = controlBubbleParams ?: return
-        params.x = (params.x + dx).coerceIn(0, resources.displayMetrics.widthPixels - 70)
-        params.y = (params.y + dy).coerceIn(60, resources.displayMetrics.heightPixels - 180)
+        params.x = (params.x + dx).coerceIn(0, resources.displayMetrics.widthPixels - 48)
+        params.y = (params.y + dy).coerceIn(70, resources.displayMetrics.heightPixels - 120)
         controlBubbleView?.let { view ->
             runCatching { windowManager?.updateViewLayout(view, params) }
         }
@@ -168,16 +159,11 @@ class OverlayService : Service() {
         }
     }
 
-    private fun overlayFlags(): Int {
-        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+    private fun drawOnlyOverlayFlags(): Int {
+        return WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-
-        if (!aimModeEnabled) {
-            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        }
-
-        return flags
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     }
 
     private fun startScreenCapture(resultCode: Int, data: Intent) {
@@ -200,17 +186,17 @@ class OverlayService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val aimAction = if (aimModeEnabled) {
+        val guideAction = if (guideEnabled) {
             NotificationCompat.Action(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "Disable Aim Mode",
-                servicePendingIntent(ACTION_DISABLE_AIM, 1)
+                "Hide Guide",
+                servicePendingIntent(ACTION_DISABLE_GUIDE, 1)
             )
         } else {
             NotificationCompat.Action(
                 android.R.drawable.ic_menu_compass,
-                "Enable Aim Mode",
-                servicePendingIntent(ACTION_ENABLE_AIM, 2)
+                "Show Guide",
+                servicePendingIntent(ACTION_ENABLE_GUIDE, 2)
             )
         }
 
@@ -218,15 +204,15 @@ class OverlayService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentTitle("Line Helper Active")
             .setContentText(
-                if (aimModeEnabled) {
-                    "Aim Mode ON: overlay captures drag gestures"
+                if (guideEnabled) {
+                    "Pass-through guide ON: predicts after the ball moves"
                 } else {
-                    "Pass-through ON: Plato taps work normally"
+                    "Guide hidden: Plato taps work normally"
                 }
             )
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
-            .addAction(aimAction)
+            .addAction(guideAction)
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 "Stop",
@@ -265,8 +251,8 @@ class OverlayService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val EXTRA_RESULT_CODE = "extra_result_code"
         private const val EXTRA_RESULT_DATA = "extra_result_data"
-        private const val ACTION_ENABLE_AIM = "com.linehelper.action.ENABLE_AIM"
-        private const val ACTION_DISABLE_AIM = "com.linehelper.action.DISABLE_AIM"
+        private const val ACTION_ENABLE_GUIDE = "com.linehelper.action.ENABLE_GUIDE"
+        private const val ACTION_DISABLE_GUIDE = "com.linehelper.action.DISABLE_GUIDE"
         private const val ACTION_STOP = "com.linehelper.action.STOP"
 
         fun start(context: Context, resultCode: Int, data: Intent) {

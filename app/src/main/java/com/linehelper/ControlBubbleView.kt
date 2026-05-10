@@ -4,27 +4,23 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.abs
 
 class ControlBubbleView(
     context: Context,
-    private val onAimToggle: () -> Unit,
-    private val onStop: () -> Unit,
+    private val onGuideToggle: () -> Unit,
     private val onDrag: (Int, Int) -> Unit
 ) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
-        textSize = 18f
+        textSize = 15f
         isFakeBoldText = true
     }
-    private val aimRect = RectF()
-    private val stopRect = RectF()
-    private var aimModeEnabled = false
+    private var guideEnabled = true
     private var downX = 0f
     private var downY = 0f
     private var lastRawX = 0f
@@ -32,36 +28,32 @@ class ControlBubbleView(
     private var moved = false
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val density = resources.displayMetrics.density
-        setMeasuredDimension((58 * density).toInt(), (106 * density).toInt())
+        val size = (42 * resources.displayMetrics.density).toInt()
+        setMeasuredDimension(size, size)
     }
 
-    fun setAimModeEnabled(enabled: Boolean) {
-        aimModeEnabled = enabled
+    fun setGuideEnabled(enabled: Boolean) {
+        guideEnabled = enabled
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val gap = 8f
-        val buttonHeight = (height - gap) / 2f
-
-        aimRect.set(0f, 0f, width.toFloat(), buttonHeight)
-        stopRect.set(0f, buttonHeight + gap, width.toFloat(), height.toFloat())
-
+        val radius = width / 2f
         paint.style = Paint.Style.FILL
-        paint.color = if (aimModeEnabled) {
-            Color.argb(220, 72, 210, 111)
+        paint.color = if (guideEnabled) {
+            Color.argb(178, 60, 190, 95)
         } else {
-            Color.argb(190, 30, 144, 255)
+            Color.argb(150, 70, 70, 70)
         }
-        canvas.drawRoundRect(aimRect, 14f, 14f, paint)
+        canvas.drawCircle(radius, radius, radius - 2f, paint)
 
-        paint.color = Color.argb(205, 220, 54, 54)
-        canvas.drawRoundRect(stopRect, 14f, 14f, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2f
+        paint.color = Color.argb(180, 255, 255, 255)
+        canvas.drawCircle(radius, radius, radius - 3f, paint)
 
-        canvas.drawText(if (aimModeEnabled) "ON" else "AIM", aimRect.centerX(), aimRect.centerY() + 7f, labelPaint)
-        canvas.drawText("STOP", stopRect.centerX(), stopRect.centerY() + 7f, labelPaint)
+        canvas.drawText(if (guideEnabled) "LH" else "OFF", radius, radius + 5f, labelPaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -78,7 +70,7 @@ class ControlBubbleView(
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.rawX - lastRawX
                 val dy = event.rawY - lastRawY
-                if (abs(event.x - downX) > 8f || abs(event.y - downY) > 8f) {
+                if (abs(event.x - downX) > 6f || abs(event.y - downY) > 6f) {
                     moved = true
                 }
                 lastRawX = event.rawX
@@ -88,12 +80,7 @@ class ControlBubbleView(
             }
 
             MotionEvent.ACTION_UP -> {
-                if (!moved) {
-                    when {
-                        aimRect.contains(event.x, event.y) -> onAimToggle()
-                        stopRect.contains(event.x, event.y) -> onStop()
-                    }
-                }
+                if (!moved) onGuideToggle()
                 return true
             }
         }
