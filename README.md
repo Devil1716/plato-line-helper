@@ -2,7 +2,7 @@
 
 [![Build Debug APK](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml/badge.svg)](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml)
 
-Current version: `1.4.0`
+Current version: `1.5.0`
 
 ## What It Does
 
@@ -24,7 +24,7 @@ The trajectory simulation uses pure Kotlin Euler integration: `FRICTION` gradual
 
 ## In-Game Controls
 
-The overlay is pass-through all the time, so Plato buttons and menus keep working normally. Use the tiny **LH** bubble to show or hide prediction; drag the bubble to move it, and use the notification **Stop** action to remove the overlay.
+The main overlay is pass-through all the time, so Plato buttons and menus keep working normally. Use the tiny **LH** bubble to show or hide prediction, and use the small **AIM** pad to preview a shot line from the detected football before taking the shot in Plato.
 
 See [GUIDE.md](GUIDE.md) for the full setup and match-use flow.
 

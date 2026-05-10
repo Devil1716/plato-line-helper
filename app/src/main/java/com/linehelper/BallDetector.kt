@@ -36,11 +36,11 @@ class BallDetector {
                 circles,
                 Imgproc.HOUGH_GRADIENT,
                 1.2,
-                60.0,
+                30.0,
                 120.0,
-                18.0,
-                15,
-                32
+                14.0,
+                8,
+                22
             )
 
             var best: CircleCandidate? = null
@@ -52,12 +52,18 @@ class BallDetector {
                 val cy = circle[1]
                 val radius = circle[2]
                 val confidence = circleMaskConfidence(mask, cx, cy, radius)
-                if (confidence <= 0.7) continue
+                if (confidence <= 0.35) continue
 
                 val darkRatio = darkPatchRatio(hsv, cx, cy, radius)
-                val radiusScore = 1.0 - (abs(radius - 18.0) / 18.0).coerceIn(0.0, 1.0)
-                val score = confidence * 0.45 + darkRatio * 0.4 + radiusScore * 0.15
-                if (score <= 0.58) continue
+                val lowSatRatio = lowSaturationRatio(hsv, cx, cy, radius)
+                val colorPenalty = saturatedColorRatio(hsv, cx, cy, radius)
+                val radiusScore = 1.0 - (abs(radius - 12.0) / 12.0).coerceIn(0.0, 1.0)
+                val score = confidence * 0.28 +
+                    darkRatio * 0.28 +
+                    lowSatRatio * 0.26 +
+                    radiusScore * 0.18 -
+                    colorPenalty * 0.35
+                if (score <= 0.42) continue
 
                 val candidate = CircleCandidate(cx.toFloat(), cy.toFloat(), score)
                 if (best == null || candidate.score > best.score) {
@@ -77,6 +83,30 @@ class BallDetector {
     }
 
     private fun darkPatchRatio(hsv: Mat, cx: Double, cy: Double, radius: Double): Double {
+        return sampleRatio(hsv, cx, cy, radius) { saturation, value ->
+            value < 105.0 && saturation < 125.0
+        }
+    }
+
+    private fun lowSaturationRatio(hsv: Mat, cx: Double, cy: Double, radius: Double): Double {
+        return sampleRatio(hsv, cx, cy, radius) { saturation, _ ->
+            saturation < 90.0
+        }
+    }
+
+    private fun saturatedColorRatio(hsv: Mat, cx: Double, cy: Double, radius: Double): Double {
+        return sampleRatio(hsv, cx, cy, radius) { saturation, value ->
+            saturation > 115.0 && value > 70.0
+        }
+    }
+
+    private fun sampleRatio(
+        hsv: Mat,
+        cx: Double,
+        cy: Double,
+        radius: Double,
+        matches: (saturation: Double, value: Double) -> Boolean
+    ): Double {
         var darkPixels = 0
         var samplePixels = 0
         val left = (cx - radius * 0.72).toInt().coerceAtLeast(0)
@@ -95,7 +125,7 @@ class BallDetector {
                 samplePixels++
                 val saturation = pixel[1]
                 val value = pixel[2]
-                if (value < 95.0 && saturation < 110.0) {
+                if (matches(saturation, value)) {
                     darkPixels++
                 }
             }

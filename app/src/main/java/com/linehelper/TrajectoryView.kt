@@ -37,6 +37,10 @@ class TrajectoryView(context: Context) : View(context) {
     private var velocityY = 0f
     private var predictionVisibleUntil = 0L
     private var guideEnabled = true
+    private var manualAimActive = false
+    private var manualDirX = 0f
+    private var manualDirY = -1f
+    private var manualPower = 0f
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -113,12 +117,30 @@ class TrajectoryView(context: Context) : View(context) {
         invalidate()
     }
 
+    fun updateManualAim(dirX: Float, dirY: Float, power: Float, active: Boolean) {
+        manualDirX = dirX
+        manualDirY = dirY
+        manualPower = power
+        manualAimActive = active
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!guideEnabled || !hasLiveBallDetection) return
 
         drawDetectedBallIndicator(canvas)
-        if (SystemClock.uptimeMillis() <= predictionVisibleUntil) {
+        if (manualAimActive) {
+            val result = simulatePhysics(
+                ballX,
+                ballY,
+                manualDirX,
+                manualDirY,
+                (6f + manualPower * 22f).coerceIn(6f, 28f)
+            )
+            drawTrajectory(canvas, result.points, result.outcome)
+            drawAimVector(canvas)
+        } else if (SystemClock.uptimeMillis() <= predictionVisibleUntil) {
             val result = simulateFromVelocity(ballX, ballY, velocityX, velocityY)
             drawTrajectory(canvas, result.points, result.outcome)
         }
@@ -261,6 +283,19 @@ class TrajectoryView(context: Context) : View(context) {
         paint.strokeWidth = 2.5f
         paint.color = Color.argb(190, 90, 255, 130)
         canvas.drawCircle(ballX, ballY, radius + 5f, paint)
+    }
+
+    private fun drawAimVector(canvas: Canvas) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 3f
+        paint.color = Color.argb(150, 255, 255, 255)
+        canvas.drawLine(
+            ballX,
+            ballY,
+            ballX + manualDirX * (45f + manualPower * 60f),
+            ballY + manualDirY * (45f + manualPower * 60f),
+            paint
+        )
     }
 
     private fun FieldBounds.isCloseTo(other: FieldBounds): Boolean {

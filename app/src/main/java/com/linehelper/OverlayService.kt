@@ -27,6 +27,8 @@ class OverlayService : Service() {
     private var overlayParams: WindowManager.LayoutParams? = null
     private var controlBubbleView: ControlBubbleView? = null
     private var controlBubbleParams: WindowManager.LayoutParams? = null
+    private var aimPadView: AimPadView? = null
+    private var aimPadParams: WindowManager.LayoutParams? = null
     private var captureManager: ScreenCaptureManager? = null
     private var guideEnabled = true
 
@@ -81,10 +83,15 @@ class OverlayService : Service() {
         controlBubbleView?.let { view ->
             runCatching { windowManager?.removeView(view) }
         }
+        aimPadView?.let { view ->
+            runCatching { windowManager?.removeView(view) }
+        }
         trajectoryView = null
         controlBubbleView = null
+        aimPadView = null
         overlayParams = null
         controlBubbleParams = null
+        aimPadParams = null
         windowManager = null
         serviceScope.cancel()
         super.onDestroy()
@@ -106,6 +113,7 @@ class OverlayService : Service() {
 
         windowManager?.addView(trajectoryView, overlayParams)
         addControlBubble()
+        addAimPad()
     }
 
     private fun setGuideEnabled(enabled: Boolean) {
@@ -113,6 +121,28 @@ class OverlayService : Service() {
         trajectoryView?.setGuideEnabled(enabled)
         controlBubbleView?.setGuideEnabled(enabled)
         updateNotification()
+    }
+
+    private fun addAimPad() {
+        aimPadView = AimPadView(this) { dirX, dirY, power, active ->
+            trajectoryView?.updateManualAim(dirX, dirY, power, active)
+        }
+
+        aimPadParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            overlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 12
+            y = (resources.displayMetrics.heightPixels * 0.68f).toInt()
+        }
+
+        windowManager?.addView(aimPadView, aimPadParams)
     }
 
     private fun addControlBubble() {
