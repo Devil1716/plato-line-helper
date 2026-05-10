@@ -2,6 +2,8 @@
 
 [![Build Debug APK](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml/badge.svg)](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml)
 
+Current version: `1.1.0`
+
 ## What It Does
 
 Plato Line Helper is a transparent Android overlay that draws a slingshot-style aim guide over Plato Table Soccer. It uses screen capture plus OpenCV to detect the ball and field, then previews a physics-based ball path with wall bounces, power feedback, and a highlighted top goal zone.
