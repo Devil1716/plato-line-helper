@@ -26,8 +26,12 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug
 
-      - name: Upload debug APK
+      - name: Sign APK (debug keystore)
+        run: echo "Using debug keystore — production signing out of scope"
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: debug-apk
+          name: plato-line-helper-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14

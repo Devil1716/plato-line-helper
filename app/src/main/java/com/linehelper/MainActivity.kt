@@ -1,5 +1,8 @@
 package com.linehelper
 
+import android.app.Activity
+import android.media.projection.MediaProjectionManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -11,16 +14,32 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.setPadding
 
 class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var toggleButton: Button
+    private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
     private var overlayRunning = false
+    private var shouldPromptForCaptureOnResume = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        mediaProjectionLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+                OverlayService.start(this, result.resultCode, result.data!!)
+                setOverlayRunning(true)
+            } else {
+                Toast.makeText(this, "Screen capture permission is required.", Toast.LENGTH_SHORT).show()
+                setOverlayRunning(false)
+            }
+        }
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -34,7 +53,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val title = TextView(this).apply {
-            text = "⚽ Plato Line Helper"
+            text = "Plato Line Helper"
             textSize = 28f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -51,6 +70,7 @@ class MainActivity : AppCompatActivity() {
         val permissionButton = Button(this).apply {
             text = "Grant Overlay Permission"
             setOnClickListener {
+                shouldPromptForCaptureOnResume = true
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:$packageName")
@@ -66,17 +86,7 @@ class MainActivity : AppCompatActivity() {
                     OverlayService.stop(this@MainActivity)
                     setOverlayRunning(false)
                 } else {
-                    if (!Settings.canDrawOverlays(this@MainActivity)) {
-                        Toast.makeText(
-                            this@MainActivity,
-                            "Grant overlay permission first.",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        return@setOnClickListener
-                    }
-
-                    OverlayService.start(this@MainActivity)
-                    setOverlayRunning(true)
+                    startOverlayWithPermissions()
                 }
             }
         }
@@ -84,9 +94,9 @@ class MainActivity : AppCompatActivity() {
         val hint = TextView(this).apply {
             text = """
                 1. Grant overlay permission.
-                2. Tap Start Overlay.
+                2. Approve screen capture for this session.
                 3. Open Plato Table Soccer.
-                4. Drag on the overlay to preview the shot line.
+                4. Drag to preview a shot using live ball and field detection.
             """.trimIndent()
             textSize = 16f
             setTextColor(Color.rgb(214, 224, 232))
@@ -101,6 +111,35 @@ class MainActivity : AppCompatActivity() {
         root.addView(hint, matchWidthWrapHeight())
 
         setContentView(root)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (shouldPromptForCaptureOnResume && Settings.canDrawOverlays(this)) {
+            shouldPromptForCaptureOnResume = false
+            requestMediaProjection()
+        }
+    }
+
+    private fun startOverlayWithPermissions() {
+        if (!Settings.canDrawOverlays(this)) {
+            shouldPromptForCaptureOnResume = true
+            Toast.makeText(this, "Grant overlay permission first.", Toast.LENGTH_SHORT).show()
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+            return
+        }
+
+        requestMediaProjection()
+    }
+
+    private fun requestMediaProjection() {
+        val projectionManager =
+            getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
     }
 
     private fun setOverlayRunning(running: Boolean) {

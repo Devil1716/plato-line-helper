@@ -7,11 +7,11 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.view.MotionEvent
 import android.view.View
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.sin
 
 class TrajectoryView(context: Context) : View(context) {
@@ -22,34 +22,82 @@ class TrajectoryView(context: Context) : View(context) {
         textSize = 34f
     }
     private val arrowPath = Path()
+    private val defaultBounds = FieldBounds(0f, 0f, 0f, 0f, 0f, 0f)
 
-    private var fieldLeft = 0f
-    private var fieldRight = 0f
-    private var fieldTop = 0f
-    private var fieldBottom = 0f
-    private var goalWidth = 0f
-    private var goalLeft = 0f
-    private var goalRight = 0f
+    private var fieldBounds = defaultBounds
+    private var lockedFieldBounds: FieldBounds? = null
+    private var previousDetectedBounds: FieldBounds? = null
+    private var stableBoundsCount = 0
 
     private var ballX = 0f
     private var ballY = 0f
+    private var fallbackBallX = 0f
+    private var fallbackBallY = 0f
+    private var detectionMisses = 0
+    private var hasLiveBallDetection = false
+
     private var touchStartX = 0f
     private var touchStartY = 0f
     private var aimX = 0f
     private var aimY = 0f
+    private var previousAimX = 0f
+    private var previousAimY = 0f
+    private var swipeStartAngle = 0f
+    private var swipeEndAngle = 0f
     private var isAiming = false
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        fieldLeft = w * 0.06f + 14f
-        fieldRight = w * 0.94f - 14f
-        fieldTop = h * 0.06f
-        fieldBottom = h * 0.92f
-        goalWidth = w * 0.32f
-        goalLeft = w / 2f - goalWidth / 2f
-        goalRight = w / 2f + goalWidth / 2f
+        val goalWidth = w * 0.32f
+        fieldBounds = FieldBounds(
+            left = w * 0.06f + 14f,
+            right = w * 0.94f - 14f,
+            top = h * 0.06f,
+            bottom = h * 0.92f,
+            goalLeft = w / 2f - goalWidth / 2f,
+            goalRight = w / 2f + goalWidth / 2f
+        )
         ballX = w / 2f
         ballY = h * 0.55f
+        fallbackBallX = ballX
+        fallbackBallY = ballY
+    }
+
+    fun updateDetectedBall(position: Pair<Float, Float>?) {
+        if (position == null) {
+            detectionMisses++
+            hasLiveBallDetection = false
+            if (detectionMisses > 10) {
+                ballX = fallbackBallX
+                ballY = fallbackBallY
+            }
+        } else {
+            detectionMisses = 0
+            hasLiveBallDetection = true
+            ballX = position.first
+            ballY = position.second
+            fallbackBallX = ballX
+            fallbackBallY = ballY
+        }
+        invalidate()
+    }
+
+    fun updateDetectedField(bounds: FieldBounds) {
+        if (lockedFieldBounds != null) return
+
+        val previous = previousDetectedBounds
+        stableBoundsCount = if (previous != null && bounds.isCloseTo(previous)) {
+            stableBoundsCount + 1
+        } else {
+            1
+        }
+        previousDetectedBounds = bounds
+
+        if (stableBoundsCount >= 10) {
+            lockedFieldBounds = bounds
+            fieldBounds = bounds
+        }
+        invalidate()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -59,14 +107,30 @@ class TrajectoryView(context: Context) : View(context) {
                 touchStartY = event.y
                 aimX = event.x
                 aimY = event.y
+                previousAimX = event.x
+                previousAimY = event.y
+                swipeStartAngle = 0f
+                swipeEndAngle = 0f
                 isAiming = true
                 invalidate()
                 return true
             }
 
             MotionEvent.ACTION_MOVE -> {
+                previousAimX = aimX
+                previousAimY = aimY
                 aimX = event.x
                 aimY = event.y
+                val fromStartX = aimX - touchStartX
+                val fromStartY = aimY - touchStartY
+                val segmentX = aimX - previousAimX
+                val segmentY = aimY - previousAimY
+                if (hypot(fromStartX, fromStartY) > 6f && swipeStartAngle == 0f) {
+                    swipeStartAngle = atan2(fromStartY, fromStartX)
+                }
+                if (hypot(segmentX, segmentY) > 2f) {
+                    swipeEndAngle = atan2(segmentY, segmentX)
+                }
                 invalidate()
                 return true
             }
@@ -84,11 +148,15 @@ class TrajectoryView(context: Context) : View(context) {
         super.onDraw(canvas)
         drawGoalZone(canvas)
 
+        if (lockedFieldBounds == null) {
+            canvas.drawText("calibrating...", width / 2f, height * 0.18f, textPaint)
+        }
+
         if (isAiming) {
             val shot = currentShot()
             if (shot != null) {
-                val points = simulatePhysics(ballX, ballY, shot.dirX, shot.dirY, shot.speed)
-                drawTrajectory(canvas, points)
+                val result = simulatePhysics(ballX, ballY, shot.dirX, shot.dirY, shot.speed, shot.sidespin)
+                drawTrajectory(canvas, result.points, result.outcome)
                 drawPowerBar(canvas, shot.speed)
             }
         } else {
@@ -107,7 +175,13 @@ class TrajectoryView(context: Context) : View(context) {
         val dirX = -dragX / swipeDist
         val dirY = -dragY / swipeDist
         val initSpeed = (swipeDist / 12f).coerceIn(6f, 22f)
-        return Shot(dirX, dirY, initSpeed)
+        return Shot(dirX, dirY, initSpeed, deriveSidespin())
+    }
+
+    private fun deriveSidespin(): Float {
+        if (swipeStartAngle == 0f || swipeEndAngle == 0f) return 0f
+        val delta = normalizeAngle(swipeEndAngle - swipeStartAngle)
+        return (delta / 1.2f).coerceIn(-1f, 1f)
     }
 
     fun simulatePhysics(
@@ -115,51 +189,74 @@ class TrajectoryView(context: Context) : View(context) {
         startY: Float,
         dirX: Float,
         dirY: Float,
-        initSpeed: Float
-    ): List<PhysicsPoint> {
+        initSpeed: Float,
+        sidespin: Float = 0f
+    ): SimulationResult {
         val points = mutableListOf<PhysicsPoint>()
         var x = startX
         var y = startY
         var vx = dirX * initSpeed
         var vy = dirY * initSpeed
+        var spin = sidespin
+        var wallHit = false
 
         repeat(MAX_STEPS) {
             val speed = hypot(vx, vy)
-            if (speed < MIN_SPEED) return points
+            if (speed < MIN_SPEED) return SimulationResult(points, TrajectoryOutcome.STOPS_SHORT)
 
             points.add(PhysicsPoint(x, y, speed))
+            vx += spin * 0.012f * speed
 
             var nx = x + vx * DT
             var ny = y + vy * DT
 
-            if (nx < fieldLeft) {
-                nx = fieldLeft
+            if (nx < fieldBounds.left) {
+                nx = fieldBounds.left
                 vx = -vx * WALL_RESTITUTION
-            } else if (nx > fieldRight) {
-                nx = fieldRight
+                vy *= 0.96f
+                wallHit = true
+            } else if (nx > fieldBounds.right) {
+                nx = fieldBounds.right
                 vx = -vx * WALL_RESTITUTION
+                vy *= 0.96f
+                wallHit = true
             }
 
-            if (ny < fieldTop) {
-                points.add(PhysicsPoint(nx, fieldTop, hypot(vx, vy)))
-                return points
-            } else if (ny > fieldBottom) {
-                ny = fieldBottom
+            if (ny < fieldBounds.top) {
+                points.add(PhysicsPoint(nx, fieldBounds.top, hypot(vx, vy)))
+                val scored = nx in fieldBounds.goalLeft..fieldBounds.goalRight
+                return SimulationResult(
+                    points,
+                    if (scored) TrajectoryOutcome.GOAL else TrajectoryOutcome.WALL_HIT
+                )
+            } else if (ny > fieldBounds.bottom) {
+                ny = fieldBounds.bottom
                 vy = -vy * WALL_RESTITUTION
+                vx *= 0.96f
+                wallHit = true
             }
 
             x = nx
             y = ny
             vx *= FRICTION
-            vy *= FRICTION
+            vy *= FRICTION * FLOOR_FRICTION
+            spin *= SPIN_DECAY
         }
 
-        return points
+        return SimulationResult(
+            points,
+            if (wallHit) TrajectoryOutcome.WALL_HIT else TrajectoryOutcome.STOPS_SHORT
+        )
     }
 
-    private fun drawTrajectory(canvas: Canvas, points: List<PhysicsPoint>) {
+    private fun drawTrajectory(canvas: Canvas, points: List<PhysicsPoint>, outcome: TrajectoryOutcome) {
         if (points.size < 2) return
 
+        val (red, green, blue) = when (outcome) {
+            TrajectoryOutcome.GOAL -> Triple(80, 255, 120)
+            TrajectoryOutcome.WALL_HIT -> Triple(255, 200, 50)
+            TrajectoryOutcome.STOPS_SHORT -> Triple(255, 80, 80)
+        }
         val maxSpeed = max(points.maxOf { it.speed }, MIN_SPEED)
         var distance = 0f
         var nextDotAt = 0f
@@ -174,7 +271,7 @@ class TrajectoryView(context: Context) : View(context) {
             if (distance >= nextDotAt) {
                 val dotRadius = 2f + speedRatio * 2.5f
                 val alpha = ((0.35f + speedRatio * 0.55f) * 255).toInt().coerceIn(0, 255)
-                paint.color = Color.argb(alpha, 100, 220, 255)
+                paint.color = Color.argb(alpha, red, green, blue)
                 paint.style = Paint.Style.FILL
                 canvas.drawCircle(point.x, point.y, dotRadius, paint)
                 nextDotAt = distance + dotSpacing
@@ -184,10 +281,10 @@ class TrajectoryView(context: Context) : View(context) {
             lastY = point.y
         }
 
-        drawArrowhead(canvas, points)
+        drawArrowhead(canvas, points, red, green, blue)
     }
 
-    private fun drawArrowhead(canvas: Canvas, points: List<PhysicsPoint>) {
+    private fun drawArrowhead(canvas: Canvas, points: List<PhysicsPoint>, red: Int, green: Int, blue: Int) {
         val last = points.last()
         val previous = points[points.lastIndex - 1]
         val angle = atan2(last.y - previous.y, last.x - previous.x)
@@ -206,7 +303,7 @@ class TrajectoryView(context: Context) : View(context) {
         )
         arrowPath.close()
 
-        paint.color = Color.argb(230, 100, 220, 255)
+        paint.color = Color.argb(230, red, green, blue)
         paint.style = Paint.Style.FILL
         canvas.drawPath(arrowPath, paint)
     }
@@ -240,11 +337,24 @@ class TrajectoryView(context: Context) : View(context) {
     private fun drawGoalZone(canvas: Canvas) {
         paint.style = Paint.Style.FILL
         paint.color = Color.argb(58, 76, 255, 132)
-        canvas.drawRect(goalLeft, fieldTop - 12f, goalRight, fieldTop + 22f, paint)
+        canvas.drawRect(
+            fieldBounds.goalLeft,
+            fieldBounds.top - 12f,
+            fieldBounds.goalRight,
+            fieldBounds.top + 22f,
+            paint
+        )
     }
 
     private fun drawBall(canvas: Canvas) {
         val radius = width * 0.043f
+        if (hasLiveBallDetection) {
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 2f
+            paint.color = Color.argb((0.6f * 255).toInt(), 80, 255, 120)
+            canvas.drawCircle(ballX, ballY, radius + 8f, paint)
+        }
+
         paint.style = Paint.Style.FILL
         paint.color = Color.WHITE
         canvas.drawCircle(ballX, ballY, radius, paint)
@@ -269,15 +379,53 @@ class TrajectoryView(context: Context) : View(context) {
         canvas.drawPath(path, paint)
     }
 
+    private fun normalizeAngle(angle: Float): Float {
+        var normalized = angle
+        while (normalized > Math.PI) normalized -= (Math.PI * 2).toFloat()
+        while (normalized < -Math.PI) normalized += (Math.PI * 2).toFloat()
+        return normalized
+    }
+
+    private fun FieldBounds.isCloseTo(other: FieldBounds): Boolean {
+        val tolerance = max(8f, width * 0.015f)
+        return abs(left - other.left) <= tolerance &&
+            abs(right - other.right) <= tolerance &&
+            abs(top - other.top) <= tolerance &&
+            abs(bottom - other.bottom) <= tolerance &&
+            abs(goalLeft - other.goalLeft) <= tolerance &&
+            abs(goalRight - other.goalRight) <= tolerance
+    }
+
+    private val FieldBounds.width: Float
+        get() = right - left
+
     data class PhysicsPoint(val x: Float, val y: Float, val speed: Float)
 
-    private data class Shot(val dirX: Float, val dirY: Float, val speed: Float)
+    data class SimulationResult(
+        val points: List<PhysicsPoint>,
+        val outcome: TrajectoryOutcome
+    )
+
+    enum class TrajectoryOutcome {
+        GOAL,
+        WALL_HIT,
+        STOPS_SHORT
+    }
+
+    private data class Shot(
+        val dirX: Float,
+        val dirY: Float,
+        val speed: Float,
+        val sidespin: Float
+    )
 
     companion object {
-        const val FRICTION = 0.975f
-        const val WALL_RESTITUTION = 0.72f
-        const val MIN_SPEED = 0.35f
+        const val FRICTION = 0.973f
+        const val WALL_RESTITUTION = 0.68f
+        const val FLOOR_FRICTION = 0.991f
+        const val SPIN_DECAY = 0.95f
+        const val MIN_SPEED = 0.3f
         const val DT = 1.0f
-        const val MAX_STEPS = 800
+        const val MAX_STEPS = 1000
     }
 }

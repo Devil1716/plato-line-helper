@@ -10,10 +10,18 @@ import android.os.Build
 import android.os.IBinder
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 class OverlayService : Service() {
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var windowManager: WindowManager? = null
     private var trajectoryView: TrajectoryView? = null
+    private var captureManager: ScreenCaptureManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -31,14 +39,33 @@ class OverlayService : Service() {
         addOverlay()
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
+        val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent?.getParcelableExtra(EXTRA_RESULT_DATA)
+        }
+
+        if (resultCode != 0 && data != null && captureManager == null) {
+            startScreenCapture(resultCode, data)
+        }
+
+        return START_STICKY
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        captureManager?.stop()
+        captureManager = null
         trajectoryView?.let { view ->
             runCatching { windowManager?.removeView(view) }
         }
         trajectoryView = null
         windowManager = null
+        serviceScope.cancel()
         super.onDestroy()
     }
 
@@ -66,6 +93,25 @@ class OverlayService : Service() {
         windowManager?.addView(trajectoryView, params)
     }
 
+    private fun startScreenCapture(resultCode: Int, data: Intent) {
+        val manager = ScreenCaptureManager(this, resultCode, data, serviceScope)
+        captureManager = manager
+        manager.start()
+
+        serviceScope.launch {
+            manager.ballPosition.collectLatest { position ->
+                trajectoryView?.updateDetectedBall(position)
+            }
+        }
+        serviceScope.launch {
+            manager.fieldBounds.collectLatest { bounds ->
+                bounds?.let {
+                    trajectoryView?.updateDetectedField(it)
+                }
+            }
+        }
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -81,9 +127,14 @@ class OverlayService : Service() {
     companion object {
         private const val CHANNEL_ID = "LineHelperChannel"
         private const val NOTIFICATION_ID = 1001
+        private const val EXTRA_RESULT_CODE = "extra_result_code"
+        private const val EXTRA_RESULT_DATA = "extra_result_data"
 
-        fun start(context: Context) {
-            val intent = Intent(context, OverlayService::class.java)
+        fun start(context: Context, resultCode: Int, data: Intent) {
+            val intent = Intent(context, OverlayService::class.java).apply {
+                putExtra(EXTRA_RESULT_CODE, resultCode)
+                putExtra(EXTRA_RESULT_DATA, data)
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
