@@ -20,6 +20,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.setPadding
 
 class MainActivity : AppCompatActivity() {
+    private companion object {
+        private const val LATEST_RELEASE_URL =
+            "https://github.com/Devil1716/plato-line-helper/releases/latest"
+    }
+
     private lateinit var statusText: TextView
     private lateinit var toggleButton: Button
     private lateinit var mediaProjectionLauncher: ActivityResultLauncher<Intent>
@@ -91,12 +96,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        val updateButton = Button(this).apply {
+            text = "Check for Updates"
+            setOnClickListener {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(LATEST_RELEASE_URL)))
+            }
+        }
+
         val hint = TextView(this).apply {
             text = """
                 1. Grant overlay permission.
                 2. Approve screen capture for this session.
                 3. Open Plato Table Soccer.
                 4. Drag to preview a shot using live ball and field detection.
+                5. Use Check for Updates to download the newest APK.
             """.trimIndent()
             textSize = 16f
             setTextColor(Color.rgb(214, 224, 232))
@@ -108,6 +121,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(statusText, matchWidthWrapHeight())
         root.addView(permissionButton, matchWidthWrapHeight())
         root.addView(toggleButton, matchWidthWrapHeight())
+        root.addView(updateButton, matchWidthWrapHeight())
         root.addView(hint, matchWidthWrapHeight())
 
         setContentView(root)

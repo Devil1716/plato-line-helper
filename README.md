@@ -20,6 +20,10 @@ The trajectory simulation uses pure Kotlin Euler integration: `FRICTION` gradual
 4. Grant overlay permission and approve the screen capture prompt for the current session.
 5. Tap Start Overlay, then open Plato Table Soccer.
 
+## Updates
+
+Tap **Check for Updates** inside the app to open the latest GitHub release and download the newest APK.
+
 ## Roadmap
 
 - [x] Ball detection via OpenCV
