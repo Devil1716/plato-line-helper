@@ -1,7 +1,9 @@
 package com.linehelper
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -21,25 +23,35 @@ class OverlayService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var windowManager: WindowManager? = null
     private var trajectoryView: TrajectoryView? = null
+    private var overlayParams: WindowManager.LayoutParams? = null
     private var captureManager: ScreenCaptureManager? = null
+    private var aimModeEnabled = false
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(
-            NOTIFICATION_ID,
-            NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_menu_compass)
-                .setContentTitle("Line Helper Active")
-                .setContentText("Overlay running over Plato")
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOngoing(true)
-                .build()
-        )
+        startForeground(NOTIFICATION_ID, buildNotification())
         addOverlay()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_ENABLE_AIM -> {
+                setAimModeEnabled(true)
+                return START_STICKY
+            }
+
+            ACTION_DISABLE_AIM -> {
+                setAimModeEnabled(false)
+                return START_STICKY
+            }
+
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        }
+
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
         val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent?.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
@@ -64,6 +76,7 @@ class OverlayService : Service() {
             runCatching { windowManager?.removeView(view) }
         }
         trajectoryView = null
+        overlayParams = null
         windowManager = null
         serviceScope.cancel()
         super.onDestroy()
@@ -71,26 +84,52 @@ class OverlayService : Service() {
 
     private fun addOverlay() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        trajectoryView = TrajectoryView(this)
+        trajectoryView = TrajectoryView(this).apply {
+            setAimModeEnabled(aimModeEnabled)
+        }
 
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        overlayParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            overlayType(),
+            overlayFlags(),
+            PixelFormat.TRANSLUCENT
+        )
+
+        windowManager?.addView(trajectoryView, overlayParams)
+    }
+
+    private fun setAimModeEnabled(enabled: Boolean) {
+        aimModeEnabled = enabled
+        trajectoryView?.setAimModeEnabled(enabled)
+
+        val params = overlayParams ?: return
+        params.flags = overlayFlags()
+        trajectoryView?.let { view ->
+            runCatching { windowManager?.updateViewLayout(view, params) }
+        }
+        updateNotification()
+    }
+
+    private fun overlayType(): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
             @Suppress("DEPRECATION")
             WindowManager.LayoutParams.TYPE_PHONE
         }
+    }
 
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        )
+    private fun overlayFlags(): Int {
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
 
-        windowManager?.addView(trajectoryView, params)
+        if (!aimModeEnabled) {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+
+        return flags
     }
 
     private fun startScreenCapture(resultCode: Int, data: Intent) {
@@ -112,6 +151,55 @@ class OverlayService : Service() {
         }
     }
 
+    private fun buildNotification(): Notification {
+        val aimAction = if (aimModeEnabled) {
+            NotificationCompat.Action(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Disable Aim Mode",
+                servicePendingIntent(ACTION_DISABLE_AIM, 1)
+            )
+        } else {
+            NotificationCompat.Action(
+                android.R.drawable.ic_menu_compass,
+                "Enable Aim Mode",
+                servicePendingIntent(ACTION_ENABLE_AIM, 2)
+            )
+        }
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setContentTitle("Line Helper Active")
+            .setContentText(
+                if (aimModeEnabled) {
+                    "Aim Mode ON: overlay captures drag gestures"
+                } else {
+                    "Pass-through ON: Plato taps work normally"
+                }
+            )
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .addAction(aimAction)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Stop",
+                servicePendingIntent(ACTION_STOP, 3)
+            )
+            .build()
+    }
+
+    private fun updateNotification() {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION_ID, buildNotification())
+    }
+
+    private fun servicePendingIntent(action: String, requestCode: Int): PendingIntent {
+        val intent = Intent(this, OverlayService::class.java).apply {
+            this.action = action
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        return PendingIntent.getService(this, requestCode, intent, flags)
+    }
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -129,6 +217,9 @@ class OverlayService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val EXTRA_RESULT_CODE = "extra_result_code"
         private const val EXTRA_RESULT_DATA = "extra_result_data"
+        private const val ACTION_ENABLE_AIM = "com.linehelper.action.ENABLE_AIM"
+        private const val ACTION_DISABLE_AIM = "com.linehelper.action.DISABLE_AIM"
+        private const val ACTION_STOP = "com.linehelper.action.STOP"
 
         fun start(context: Context, resultCode: Int, data: Intent) {
             val intent = Intent(context, OverlayService::class.java).apply {

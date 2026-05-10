@@ -2,7 +2,7 @@
 
 [![Build Debug APK](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml/badge.svg)](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml)
 
-Current version: `1.1.0`
+Current version: `1.1.1`
 
 ## What It Does
 
@@ -21,6 +21,10 @@ The trajectory simulation uses pure Kotlin Euler integration: `FRICTION` gradual
 3. Build and install the debug APK on an Android 8.0+ device.
 4. Grant overlay permission and approve the screen capture prompt for the current session.
 5. Tap Start Overlay, then open Plato Table Soccer.
+
+## In-Game Controls
+
+The overlay starts in pass-through mode so Plato buttons and menus keep working normally. Pull down the Android notification shade and tap **Enable Aim Mode** when you want to drag an aim preview, tap **Disable Aim Mode** to interact with Plato again, or tap **Stop** to remove the overlay immediately.
 
 ## Updates
 

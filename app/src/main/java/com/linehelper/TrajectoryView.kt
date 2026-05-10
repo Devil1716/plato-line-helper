@@ -45,6 +45,7 @@ class TrajectoryView(context: Context) : View(context) {
     private var swipeStartAngle = 0f
     private var swipeEndAngle = 0f
     private var isAiming = false
+    private var aimModeEnabled = false
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -100,7 +101,17 @@ class TrajectoryView(context: Context) : View(context) {
         invalidate()
     }
 
+    fun setAimModeEnabled(enabled: Boolean) {
+        aimModeEnabled = enabled
+        if (!enabled) {
+            isAiming = false
+        }
+        invalidate()
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!aimModeEnabled) return false
+
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 touchStartX = event.x
@@ -146,6 +157,15 @@ class TrajectoryView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+
+        if (!aimModeEnabled) {
+            if (lockedFieldBounds != null && hasLiveBallDetection) {
+                drawGoalZone(canvas)
+                drawBall(canvas)
+            }
+            return
+        }
+
         drawGoalZone(canvas)
 
         if (lockedFieldBounds == null) {
