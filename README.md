@@ -2,7 +2,7 @@
 
 [![Build Debug APK](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml/badge.svg)](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml)
 
-Current version: `1.1.1`
+Current version: `1.2.0`
 
 ## What It Does
 
@@ -24,7 +24,9 @@ The trajectory simulation uses pure Kotlin Euler integration: `FRICTION` gradual
 
 ## In-Game Controls
 
-The overlay starts in pass-through mode so Plato buttons and menus keep working normally. Pull down the Android notification shade and tap **Enable Aim Mode** when you want to drag an aim preview, tap **Disable Aim Mode** to interact with Plato again, or tap **Stop** to remove the overlay immediately.
+The overlay starts in pass-through mode so Plato buttons and menus keep working normally. Use the small floating control panel: tap **AIM** to drag an aim preview, wait for it to auto-disable after release, or tap **STOP** to remove the overlay immediately.
+
+See [GUIDE.md](GUIDE.md) for the full setup and match-use flow.
 
 ## Updates
 

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.view.Gravity
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,7 @@ class OverlayService : Service() {
     private var windowManager: WindowManager? = null
     private var trajectoryView: TrajectoryView? = null
     private var overlayParams: WindowManager.LayoutParams? = null
+    private var controlBubbleView: ControlBubbleView? = null
     private var captureManager: ScreenCaptureManager? = null
     private var aimModeEnabled = false
 
@@ -75,7 +77,11 @@ class OverlayService : Service() {
         trajectoryView?.let { view ->
             runCatching { windowManager?.removeView(view) }
         }
+        controlBubbleView?.let { view ->
+            runCatching { windowManager?.removeView(view) }
+        }
         trajectoryView = null
+        controlBubbleView = null
         overlayParams = null
         windowManager = null
         serviceScope.cancel()
@@ -84,7 +90,9 @@ class OverlayService : Service() {
 
     private fun addOverlay() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        trajectoryView = TrajectoryView(this).apply {
+        trajectoryView = TrajectoryView(this) {
+            setAimModeEnabled(false)
+        }.apply {
             setAimModeEnabled(aimModeEnabled)
         }
 
@@ -97,11 +105,13 @@ class OverlayService : Service() {
         )
 
         windowManager?.addView(trajectoryView, overlayParams)
+        addControlBubble()
     }
 
     private fun setAimModeEnabled(enabled: Boolean) {
         aimModeEnabled = enabled
         trajectoryView?.setAimModeEnabled(enabled)
+        controlBubbleView?.setAimModeEnabled(enabled)
 
         val params = overlayParams ?: return
         params.flags = overlayFlags()
@@ -109,6 +119,32 @@ class OverlayService : Service() {
             runCatching { windowManager?.updateViewLayout(view, params) }
         }
         updateNotification()
+    }
+
+    private fun addControlBubble() {
+        controlBubbleView = ControlBubbleView(
+            context = this,
+            onAimToggle = { setAimModeEnabled(!aimModeEnabled) },
+            onStop = { stopSelf() }
+        ).apply {
+            setAimModeEnabled(aimModeEnabled)
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            overlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = 12
+            y = 260
+        }
+
+        windowManager?.addView(controlBubbleView, params)
     }
 
     private fun overlayType(): Int {

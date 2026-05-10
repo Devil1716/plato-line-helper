@@ -14,7 +14,10 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.sin
 
-class TrajectoryView(context: Context) : View(context) {
+class TrajectoryView(
+    context: Context,
+    private val onAimGestureFinished: (() -> Unit)? = null
+) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(190, 255, 255, 255)
@@ -148,6 +151,7 @@ class TrajectoryView(context: Context) : View(context) {
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 isAiming = false
+                postDelayed({ onAimGestureFinished?.invoke() }, 1200L)
                 invalidate()
                 return true
             }
@@ -180,7 +184,7 @@ class TrajectoryView(context: Context) : View(context) {
                 drawPowerBar(canvas, shot.speed)
             }
         } else {
-            canvas.drawText("Drag to preview shot", width / 2f, height * 0.82f, textPaint)
+            canvas.drawText("Drag for guide, then repeat shot in Plato", width / 2f, height * 0.82f, textPaint)
         }
 
         drawBall(canvas)
