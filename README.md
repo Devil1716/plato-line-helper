@@ -2,7 +2,7 @@
 
 [![Build Debug APK](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml/badge.svg)](https://github.com/Devil1716/plato-line-helper/actions/workflows/build.yml)
 
-Current version: `1.2.0`
+Current version: `1.3.0`
 
 ## What It Does
 

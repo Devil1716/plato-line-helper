@@ -7,7 +7,7 @@ import org.opencv.core.Mat
 import org.opencv.core.Point
 import org.opencv.core.Scalar
 import org.opencv.imgproc.Imgproc
-import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.max
 
 class BallDetector {
@@ -40,7 +40,7 @@ class BallDetector {
                 120.0,
                 18.0,
                 15,
-                45
+                32
             )
 
             var best: CircleCandidate? = null
@@ -54,9 +54,13 @@ class BallDetector {
                 val confidence = circleMaskConfidence(mask, cx, cy, radius)
                 if (confidence <= 0.7) continue
 
-                val area = PI * radius * radius
-                val candidate = CircleCandidate(cx.toFloat(), cy.toFloat(), confidence, area)
-                if (best == null || candidate.area > best.area) {
+                val darkRatio = darkPatchRatio(hsv, cx, cy, radius)
+                val radiusScore = 1.0 - (abs(radius - 18.0) / 18.0).coerceIn(0.0, 1.0)
+                val score = confidence * 0.45 + darkRatio * 0.4 + radiusScore * 0.15
+                if (score <= 0.58) continue
+
+                val candidate = CircleCandidate(cx.toFloat(), cy.toFloat(), score)
+                if (best == null || candidate.score > best.score) {
                     best = candidate
                 }
             }
@@ -70,6 +74,35 @@ class BallDetector {
             blurred.release()
             circles.release()
         }
+    }
+
+    private fun darkPatchRatio(hsv: Mat, cx: Double, cy: Double, radius: Double): Double {
+        var darkPixels = 0
+        var samplePixels = 0
+        val left = (cx - radius * 0.72).toInt().coerceAtLeast(0)
+        val right = (cx + radius * 0.72).toInt().coerceAtMost(hsv.cols() - 1)
+        val top = (cy - radius * 0.72).toInt().coerceAtLeast(0)
+        val bottom = (cy + radius * 0.72).toInt().coerceAtMost(hsv.rows() - 1)
+        val radiusSquared = radius * radius * 0.52
+
+        for (y in top..bottom step 2) {
+            for (x in left..right step 2) {
+                val dx = x - cx
+                val dy = y - cy
+                if (dx * dx + dy * dy > radiusSquared) continue
+
+                val pixel = hsv.get(y, x) ?: continue
+                samplePixels++
+                val saturation = pixel[1]
+                val value = pixel[2]
+                if (value < 95.0 && saturation < 110.0) {
+                    darkPixels++
+                }
+            }
+        }
+
+        if (samplePixels == 0) return 0.0
+        return (darkPixels.toDouble() / samplePixels).coerceIn(0.0, 1.0)
     }
 
     private fun circleMaskConfidence(mask: Mat, cx: Double, cy: Double, radius: Double): Double {
@@ -97,7 +130,6 @@ class BallDetector {
     private data class CircleCandidate(
         val x: Float,
         val y: Float,
-        val confidence: Double,
-        val area: Double
+        val score: Double
     )
 }

@@ -26,6 +26,7 @@ class OverlayService : Service() {
     private var trajectoryView: TrajectoryView? = null
     private var overlayParams: WindowManager.LayoutParams? = null
     private var controlBubbleView: ControlBubbleView? = null
+    private var controlBubbleParams: WindowManager.LayoutParams? = null
     private var captureManager: ScreenCaptureManager? = null
     private var aimModeEnabled = false
 
@@ -83,6 +84,7 @@ class OverlayService : Service() {
         trajectoryView = null
         controlBubbleView = null
         overlayParams = null
+        controlBubbleParams = null
         windowManager = null
         serviceScope.cancel()
         super.onDestroy()
@@ -125,12 +127,13 @@ class OverlayService : Service() {
         controlBubbleView = ControlBubbleView(
             context = this,
             onAimToggle = { setAimModeEnabled(!aimModeEnabled) },
-            onStop = { stopSelf() }
+            onStop = { stopSelf() },
+            onDrag = { dx, dy -> moveControlBubble(dx, dy) }
         ).apply {
             setAimModeEnabled(aimModeEnabled)
         }
 
-        val params = WindowManager.LayoutParams(
+        controlBubbleParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType(),
@@ -139,12 +142,21 @@ class OverlayService : Service() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.END
+            gravity = Gravity.TOP or Gravity.START
             x = 12
-            y = 260
+            y = 720
         }
 
-        windowManager?.addView(controlBubbleView, params)
+        windowManager?.addView(controlBubbleView, controlBubbleParams)
+    }
+
+    private fun moveControlBubble(dx: Int, dy: Int) {
+        val params = controlBubbleParams ?: return
+        params.x = (params.x + dx).coerceIn(0, resources.displayMetrics.widthPixels - 70)
+        params.y = (params.y + dy).coerceIn(60, resources.displayMetrics.heightPixels - 180)
+        controlBubbleView?.let { view ->
+            runCatching { windowManager?.updateViewLayout(view, params) }
+        }
     }
 
     private fun overlayType(): Int {

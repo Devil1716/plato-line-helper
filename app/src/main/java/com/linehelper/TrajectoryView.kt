@@ -117,8 +117,8 @@ class TrajectoryView(
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                touchStartX = event.x
-                touchStartY = event.y
+                touchStartX = ballX
+                touchStartY = ballY
                 aimX = event.x
                 aimY = event.y
                 previousAimX = event.x
@@ -163,10 +163,6 @@ class TrajectoryView(
         super.onDraw(canvas)
 
         if (!aimModeEnabled) {
-            if (lockedFieldBounds != null && hasLiveBallDetection) {
-                drawGoalZone(canvas)
-                drawBall(canvas)
-            }
             return
         }
 
@@ -180,6 +176,7 @@ class TrajectoryView(
             val shot = currentShot()
             if (shot != null) {
                 val result = simulatePhysics(ballX, ballY, shot.dirX, shot.dirY, shot.speed, shot.sidespin)
+                drawPullVector(canvas)
                 drawTrajectory(canvas, result.points, result.outcome)
                 drawPowerBar(canvas, shot.speed)
             }
@@ -194,7 +191,7 @@ class TrajectoryView(
         val dragX = aimX - touchStartX
         val dragY = aimY - touchStartY
         val swipeDist = hypot(dragX, dragY)
-        if (swipeDist <= 0.01f) return null
+        if (swipeDist <= 12f) return null
 
         val dirX = -dragX / swipeDist
         val dirY = -dragY / swipeDist
@@ -356,6 +353,17 @@ class TrajectoryView(
         paint.textAlign = Paint.Align.CENTER
         paint.textSize = 24f
         canvas.drawText("POWER", width / 2f, top - 12f, paint)
+    }
+
+    private fun drawPullVector(canvas: Canvas) {
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 3f
+        paint.color = Color.argb(150, 255, 255, 255)
+        canvas.drawLine(ballX, ballY, aimX, aimY, paint)
+
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(180, 255, 255, 255)
+        canvas.drawCircle(aimX, aimY, 7f, paint)
     }
 
     private fun drawGoalZone(canvas: Canvas) {

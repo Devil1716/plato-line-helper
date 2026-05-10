@@ -57,7 +57,13 @@ class FieldDetector {
                 .map { Imgproc.boundingRect(it) to Imgproc.contourArea(it) }
                 .maxByOrNull { it.second }
                 ?.first
-                ?: return cachedBounds
+                ?: return cachedBounds ?: fallbackPlatoBounds(bitmap.width, bitmap.height)
+
+            if (fieldRect.looksLikeWholeScreen(bitmap.width, bitmap.height)) {
+                val fallback = fallbackPlatoBounds(bitmap.width, bitmap.height)
+                cachedBounds = fallback
+                return fallback
+            }
 
             Core.inRange(
                 hsv,
@@ -135,6 +141,25 @@ class FieldDetector {
     companion object {
         private const val REDETECT_INTERVAL = 90
     }
+}
+
+private fun Rect.looksLikeWholeScreen(width: Int, height: Int): Boolean {
+    return this.width > width * 0.86f || this.height > height * 0.72f || this.y < height * 0.08f
+}
+
+private fun fallbackPlatoBounds(width: Int, height: Int): FieldBounds {
+    val left = width * 0.13f
+    val right = width * 0.865f
+    val top = height * 0.235f
+    val bottom = height * 0.82f
+    return FieldBounds(
+        left = left,
+        right = right,
+        top = top,
+        bottom = bottom,
+        goalLeft = width * 0.355f,
+        goalRight = width * 0.645f
+    )
 }
 
 data class FieldBounds(
